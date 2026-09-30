@@ -1,0 +1,139 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://arvr-brain-tumour.local/schema/case-manifest.schema.json",
+  "title": "Case Manifest",
+  "description": "Versioned contract between the offline Python processing pipeline (data-processing/) and the browser frontend (frontend/). One manifest.json accompanies every case package under frontend/public/cases/<caseId>/. Mirrors frontend/src/case/types.ts — keep both in sync by hand.",
+  "type": "object",
+  "required": ["schemaVersion", "caseId", "displayName", "provenance", "geometry", "regions", "mriPreviews", "scenarios", "limitations"],
+  "properties": {
+    "schemaVersion": { "type": "string", "const": "1.0.0" },
+    "caseId": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+    "displayName": { "type": "string" },
+
+    "provenance": {
+      "type": "object",
+      "required": ["datasetName", "datasetVersion", "sourceUrl", "sourceCaseId", "licence", "maskOrigin", "checksums"],
+      "properties": {
+        "datasetName": { "type": "string" },
+        "datasetVersion": { "type": "string" },
+        "sourceUrl": { "type": "string" },
+        "sourceCaseId": { "type": "string" },
+        "licence": { "type": "string" },
+        "maskOrigin": {
+          "type": "string",
+          "description": "e.g. 'dataset-supplied expert annotation' or 'manual demonstration contour — not expert-validated'"
+        },
+        "redistributable": { "type": "boolean" },
+        "checksums": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+
+    "geometry": {
+      "type": "object",
+      "required": ["originalAffine", "units", "orientation", "displayTransform"],
+      "properties": {
+        "originalAffine": {
+          "type": "array",
+          "items": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "units": { "type": "string", "const": "mm" },
+        "orientation": { "type": "string", "description": "e.g. RAS, LPS — as validated in step B.1" },
+        "displayTransform": {
+          "type": "array",
+          "description": "Transform applied for on-screen display only; must never be used when computing volumes.",
+          "items": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 },
+          "minItems": 4,
+          "maxItems": 4
+        }
+      }
+    },
+
+    "regions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "meshPath", "color", "volumeMl", "isNested"],
+        "properties": {
+          "id": { "type": "string" },
+          "label": { "type": "string" },
+          "meshPath": { "type": "string" },
+          "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+          "volumeMl": { "type": "number", "minimum": 0 },
+          "isNested": {
+            "type": "boolean",
+            "description": "True for regions that are subsets of another region (e.g. enhancing tumour within whole tumour). Nested region volumes must never be summed as disjoint."
+          },
+          "nestedWithin": { "type": ["string", "null"] },
+          "available": { "type": "boolean", "default": true }
+        }
+      }
+    },
+
+    "anatomicalContext": {
+      "type": "object",
+      "description": "Optional same-case brain envelope or generic illustrative reference mesh.",
+      "properties": {
+        "meshPath": { "type": "string" },
+        "isPatientSpecific": { "type": "boolean" },
+        "label": { "type": "string" }
+      }
+    },
+
+    "mriPreviews": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["plane", "slicePosition", "imagePath"],
+        "properties": {
+          "plane": { "type": "string", "enum": ["axial", "coronal", "sagittal"] },
+          "slicePosition": { "type": "number" },
+          "imagePath": { "type": "string" },
+          "overlayPath": { "type": ["string", "null"] }
+        }
+      }
+    },
+
+    "scenarios": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "method", "explanation", "parameters", "frames"],
+        "properties": {
+          "id": { "type": "string", "enum": ["baseline", "illustrative-expansion", "resection", "localised-reduction", "global-reduction"] },
+          "method": { "type": "string" },
+          "explanation": { "type": "string", "description": "Required plain-language caveat shown to the user — see plan section E." },
+          "parameters": { "type": "object" },
+          "frames": {
+            "type": "array",
+            "minItems": 5,
+            "maxItems": 5,
+            "items": {
+              "type": "object",
+              "required": ["step", "meshPaths", "volumesMl"],
+              "properties": {
+                "step": { "type": "integer", "minimum": 0, "maximum": 4 },
+                "meshPaths": { "type": "object", "additionalProperties": { "type": "string" } },
+                "volumesMl": { "type": "object", "additionalProperties": { "type": "number" } }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "limitations": {
+      "type": "object",
+      "required": ["missingAnatomy", "annotationStatus", "simulationCaveats"],
+      "properties": {
+        "missingAnatomy": { "type": "array", "items": { "type": "string" } },
+        "annotationStatus": { "type": "string" },
+        "simulationCaveats": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

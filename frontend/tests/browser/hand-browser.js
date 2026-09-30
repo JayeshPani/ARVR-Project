@@ -1,0 +1,43 @@
+async (page) => {
+ const results={}, errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto('http://127.0.0.1:4173');await page.getByRole('button',{name:'explore',exact:true}).click();
+ const enable=()=>page.getByRole('button',{name:'Enable hand controls',exact:true}).click();
+ const status=()=>page.locator('[data-hand=status]').innerText();
+ await page.getByRole('button',{name:'Enable hand controls',exact:true}).waitFor();
+ await page.evaluate(()=>{navigator.mediaDevices.getUserMedia=async()=>{throw new DOMException('Test denial','NotAllowedError');};});
+ await enable();await page.waitForFunction(()=>document.querySelector('[data-hand=status]')?.textContent?.includes('unavailable'));
+ results.denial=await status();
+ await page.evaluate(()=>{
+  window.makeStream=()=>{const c=document.createElement('canvas');c.width=640;c.height=480;const ctx=c.getContext('2d');let n=0;window.videoTimer=setInterval(()=>{ctx.fillStyle=n++%2?'#888':'#999';ctx.fillRect(0,0,640,480)},50);window.testStream=c.captureStream(20);return window.testStream;};
+  navigator.mediaDevices.getUserMedia=()=>new Promise(resolve=>{window.grantCamera=()=>resolve(window.makeStream());});
+ });
+ await enable();await page.getByRole('button',{name:'Disable hand controls',exact:true}).click();await page.evaluate(()=>window.grantCamera());await page.waitForTimeout(100);
+ results.lateGrant=await page.evaluate(()=>window.testStream.getTracks().every(t=>t.readyState==='ended'));
+ await page.evaluate(()=>{clearInterval(window.videoTimer);navigator.mediaDevices.getUserMedia=async()=>window.makeStream();});
+ await enable();await page.waitForFunction(()=>document.querySelector('[data-hand=status]')?.textContent?.startsWith('Ready'),{},{timeout:30000});
+ results.worker=await status();
+ await page.getByRole('button',{name:'Pause',exact:true}).click();results.paused=await status();
+ await page.getByRole('button',{name:'Resume',exact:true}).click();await page.getByRole('checkbox',{name:'Show hand preview'}).check();
+ await page.getByRole('button',{name:'Reset position',exact:true}).click();
+ await page.getByRole('button',{name:'scenarios',exact:true}).click();await page.getByRole('button',{name:'Enable hand controls',exact:true}).waitFor();
+ results.navigationStopsCamera=await page.evaluate(()=>window.testStream.getTracks().every(t=>t.readyState==='ended'));
+ await page.route('**/models/hand_landmarker.task',route=>route.fulfill({status:404,body:'missing'}));
+ await enable();await page.waitForFunction(()=>document.querySelector('[data-hand=status]')?.textContent?.includes('unavailable'),{},{timeout:30000});
+ results.missingModel={status:await status(),stopped:await page.evaluate(()=>window.testStream.getTracks().every(t=>t.readyState==='ended'))};
+ await page.unroute('**/models/hand_landmarker.task');
+ await page.evaluate(()=>{clearInterval(window.videoTimer);navigator.mediaDevices.getUserMedia=()=>new Promise(resolve=>{window.grantCamera=()=>resolve(window.makeStream());});});
+ await enable();await page.getByRole('button',{name:'overview',exact:true}).click();await page.evaluate(()=>window.grantCamera());await page.waitForTimeout(100);
+ results.navigationDuringStart=await page.evaluate(()=>window.testStream.getTracks().every(t=>t.readyState==='ended'));
+ await page.getByRole('button',{name:'explore',exact:true}).click();await page.getByRole('button',{name:'Enable hand controls',exact:true}).waitFor();
+ await page.getByRole('button',{name:'Enter AR',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('#ar-state')?.textContent==='starting');
+ await page.getByRole('button',{name:'Exit AR',exact:true}).click();await page.evaluate(()=>window.grantCamera());await page.waitForTimeout(250);
+ results.arLateGrant=await page.evaluate(()=>window.testStream.getTracks().every(t=>t.readyState==='ended'));
+ results.arExited=await page.locator('#ar-overlay').isHidden();
+ await page.setViewportSize({width:390,height:844});results.mobileOverflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth);
+ await page.setViewportSize({width:1280,height:900});await page.getByRole('slider',{name:'Brain opacity'}).fill('100');await page.evaluate(()=>{clearInterval(window.videoTimer);window.scrollTo(0,0)});
+ await page.screenshot({path:'output/playwright/hand-controls.png'});
+ results.errors=errors;
+ if(!results.lateGrant||!results.navigationStopsCamera||!results.navigationDuringStart||!results.arLateGrant||!results.arExited||results.mobileOverflow||errors.length)throw new Error(JSON.stringify(results));
+ return results;
+}

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>AR feasibility test</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #111; color: #eee; font-family: system-ui, sans-serif; }
+      #ui { position: fixed; top: 0; left: 0; right: 0; z-index: 10; padding: 0.75rem; display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; background: rgba(0,0,0,0.5); }
+      #container { position: fixed; inset: 0; }
+      button { font-size: 1rem; padding: 0.5rem 1rem; }
+      #state { font-weight: bold; }
+    </style>
+  </head>
+  <body>
+    <div id="ui">
+      <button id="start-btn" type="button">Start AR</button>
+      <button id="stop-btn" type="button" disabled>Stop</button>
+      <span id="state">idle</span>
+    </div>
+    <div id="container"></div>
+    <script type="module" src="/src/ar-test-entry.ts"></script>
+  </body>
+</html>

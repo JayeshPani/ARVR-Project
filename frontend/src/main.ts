@@ -1,3 +1,5 @@
+import { VoicePanel } from "./voice/panel";
+import { voiceMotion } from "./voice/commands";
 import { GesturePanel } from "./gestures/panel";
 import "./style.css";
 import { loadCaseManifest, ManifestLoadError } from "./case/loader";
@@ -6,14 +8,14 @@ import type { CaseManifest, ScenarioFrame } from "./case/types";
 import { renderVolumeChartSvg } from "./scenarios/volume-chart";
 import { CaseSceneViewer, defaultViewerSettings, type ViewerSettings } from "./viewer/scene";
 import type { AnatomicalView, CutPlane } from "./viewer/anatomy";
-import { ArSession } from "./ar/ar-session";
+import type { WorldArSession } from "./ar/world-ar-session";
 import { loadArModelGroup, disposeArModel } from "./ar/ar-model";
 
 const DEFAULT_CASE_ID = "case-01";
-const BOOTSTRAP_AR_TARGET = "/targets/bootstrap-test/card.mind";
 const app = document.querySelector<HTMLDivElement>("#app")!;
 let viewer: CaseSceneViewer | null = null;
 let gesturePanel: GesturePanel | null = null;
+let voicePanel:VoicePanel|null=null;
 let arGeneration = 0;
 let renderVersion = 0;
 let settings: ViewerSettings = defaultViewerSettings();
@@ -26,7 +28,7 @@ const scenarioChoice = { id: "baseline", step: 0, sensitivity: "medium" };
 // thing, per plan section D: "preserve the selected case and scenario
 // when switching modes."
 let currentMeshPaths: Record<string, string> = {};
-let arSession: ArSession | null = null;
+let arSession: WorldArSession | null = null;
 
 const arOverlay = document.createElement("div");
 arOverlay.id = "ar-overlay";
@@ -35,7 +37,7 @@ arOverlay.innerHTML = `
   <div id="ar-viewport"></div>
   <div id="ar-hud">
     <span id="ar-state" role="status">idle</span>
-    
+
     <button id="ar-exit" type="button">Exit AR</button>
   </div>
   <div id="ar-hand-controls"></div>
@@ -44,8 +46,9 @@ document.body.appendChild(arOverlay);
 arOverlay.querySelector<HTMLButtonElement>("#ar-exit")!.onclick = () => void exitAr();
 
 async function enterAr(manifest: CaseManifest): Promise<void> {
-  if (Object.keys(currentMeshPaths).length === 0 || arSession) return;
+  if (Object.keys(currentMeshPaths).length === 0 || !arOverlay.hidden) return;
   const generation = ++arGeneration;
+  voicePanel?.stop();
   gesturePanel?.disable();
   const stateEl = arOverlay.querySelector<HTMLSpanElement>("#ar-state")!;
   const viewport = arOverlay.querySelector<HTMLDivElement>("#ar-viewport")!;
@@ -53,14 +56,26 @@ async function enterAr(manifest: CaseManifest): Promise<void> {
   arOverlay.hidden = false;
   viewer?.stop();
   stateEl.textContent = "loading model…";
-  const session = new ArSession(viewport, BOOTSTRAP_AR_TARGET, {
-    onStateChange: (state) => {
-      if(generation === arGeneration) stateEl.textContent = state;
-    },
-
-  }, arOverlay.querySelector<HTMLElement>("#ar-hand-controls")!);
-  arSession = session;
   try {
+    const {WorldArSession}=await import("./ar/world-ar-session");
+    if(generation!==arGeneration)return;
+    const session = new WorldArSession(viewport, {
+      onStateChange: (state) => {
+        if(generation === arGeneration) stateEl.textContent = state;
+      },
+      onFatalError: (message) => {
+        if(generation !== arGeneration) return;
+        const guidance = message.toLowerCase().includes("motion permission")
+          ? "Markerless AR needs motion access, which this browser or device denied. Allow Motion & Orientation access on a motion-capable phone and try again."
+          : `Markerless AR could not start: ${message}`;
+        void exitAr().then(() => {
+          const status = app.querySelector<HTMLElement>("#viewer-status");
+          if(status) status.textContent = `${guidance} The ordinary viewer is ready.`;
+        });
+      },
+
+    }, arOverlay.querySelector<HTMLElement>("#ar-hand-controls")!);
+    arSession = session;
     const model = await loadArModelGroup(manifest, currentMeshPaths);
     if(generation !== arGeneration) { disposeArModel(model); return; }
     await session.start(model);
@@ -76,7 +91,7 @@ function refreshArButton(): void {
   const enabled = Object.keys(currentMeshPaths).length > 0;
   button.disabled = !enabled;
   button.title = enabled
-    ? "View the current model in AR (anchored to a temporary test target, not the project's own printed target yet)"
+    ? "Place the current model in markerless AR"
     : "Open Explore or Scenarios first to load a model";
 }
 
@@ -105,6 +120,7 @@ async function main(): Promise<void> {
 }
 
 function renderApp(manifest: CaseManifest, activeView: ViewName): void {
+  voicePanel?.dispose();voicePanel=null;
   gesturePanel?.dispose(); gesturePanel=null;
   viewer?.dispose(); viewer = null;
   const version = ++renderVersion;
@@ -112,7 +128,7 @@ function renderApp(manifest: CaseManifest, activeView: ViewName): void {
   app.innerHTML = `
     <header>
       <nav aria-label="Case views">${(["overview", "explore", "scenarios"] as ViewName[]).map(view => `<button data-view="${view}" ${view === activeView ? 'aria-current="page"' : ""}>${view}</button>`).join("")}</nav>
-      <button id="ar-toggle" type="button" ${Object.keys(currentMeshPaths).length ? "" : "disabled"} title="${Object.keys(currentMeshPaths).length ? "View the current model in AR (anchored to a temporary test target, not the project's own printed target yet)" : "Open Explore or Scenarios first to load a model"}">Enter AR</button>
+      <button id="ar-toggle" type="button" ${Object.keys(currentMeshPaths).length ? "" : "disabled"} title="${Object.keys(currentMeshPaths).length ? "Place the current model in markerless AR" : "Open Explore or Scenarios first to load a model"}">Enter AR</button>
     </header>
     <main>${renderers[activeView](manifest)}</main>`;
   app.querySelectorAll<HTMLButtonElement>("nav button[data-view]").forEach(button => {
@@ -221,6 +237,19 @@ async function connectViewer(manifest: CaseManifest, activeView: ViewName, versi
       applyGesture: frame=>local!.applyGesture(frame),resetManipulation:()=>local!.resetManipulation(),
       setGestureEnabled: enabled=>{local!.setGestureEnabled(enabled);if(version===renderVersion)syncControls();}
     },local.renderer.domElement);
+    const voiceHost=document.createElement("section");app.querySelector<HTMLElement>("#hand-controls")!.after(voiceHost);
+    voicePanel=new VoicePanel(voiceHost,command=>{
+      if(version!==renderVersion||!arOverlay.hidden)return "Viewer voice controls are inactive.";
+      gesturePanel?.cancelActiveGesture();
+      if(["place","lock","unlock"].includes(command.kind))return "That command is available in AR.";
+      settings.autoRotate=false;
+      if(command.kind==="zoom")local!.zoom(command.direction==="in"?0.8:1.25);
+      if(command.kind==="rotate"||command.kind==="move")local!.applyGesture(voiceMotion(command));
+      if(command.kind==="reset"){local!.resetManipulation();selectedView="oblique";}
+      if(command.kind==="opacity"){settings.brainOpacity=command.value;settings.brainVisible=true;}
+      if(command.kind==="cut"){settings.cutEnabled=command.plane!==null;if(command.plane)settings.cutPlane=command.plane;settings.cutTumour=false;}
+      local!.applySettings(settings);syncControls();return `Applied: ${command.kind}. Listening…`;
+    });
     local.start();
     status.textContent = local.warnings.length ? local.warnings.join(" ") : "Brain and tumour ready. Use the controls to explore.";
     if (activeView === "scenarios") await connectScenarios(local, manifest, version, status, volumes => {
@@ -230,6 +259,7 @@ async function connectViewer(manifest: CaseManifest, activeView: ViewName, versi
     });
   } catch (error) {
     if (version === renderVersion) {
+      voicePanel?.dispose();voicePanel=null;
       local?.dispose(); viewer = null;
       status.textContent = `3D unavailable: ${String(error)}. MRI previews remain available.`;
     }

@@ -31,3 +31,7 @@ frontend/public/cases/*
 
 # Compiled AR targets (generated from targets/*.png via MindAR's compiler)
 frontend/public/targets/*.mind
+
+# Local browser verification artifacts
+.playwright-cli/
+output/playwright/

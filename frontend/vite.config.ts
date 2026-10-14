@@ -13,6 +13,8 @@ export default defineConfig({
   // tooling that refuses self-signed certs outright — the real phone/AR
   // test flow always goes through the default HTTPS path.
   plugins: process.env.VITE_NO_HTTPS ? [] : [basicSsl()],
+  // Keep SDK worker URLs in Vite's module graph instead of prebundling them.
+  optimizeDeps: { exclude: ["@zappar/zappar", "@zappar/zappar-cv"], include: ["ua-parser-js", "gl-matrix"] },
   server: {
     host: true,
   },

@@ -31,6 +31,7 @@ export class HandTracker {
   private lastResult=0;
   constructor(privateOptions: {
     video: HTMLVideoElement;
+    sample?: ()=>{image: ImageBitmapSource; width:number; height:number; id:number}|null;
     mapping: ()=>VideoMapping;
     aspect: ()=>number;
     frame: (frame: GestureFrame)=>void;
@@ -67,7 +68,8 @@ export class HandTracker {
     document.addEventListener("visibilitychange",this.visibility);
     this.tick();
   }
-  private options: { video: HTMLVideoElement; mapping: ()=>VideoMapping; aspect: ()=>number; frame: (frame: GestureFrame)=>void; status:(status:string)=>void };
+  private options: { video: HTMLVideoElement;
+    sample?: ()=>{image: ImageBitmapSource; width:number; height:number; id:number}|null; mapping: ()=>VideoMapping; aspect: ()=>number; frame: (frame: GestureFrame)=>void; status:(status:string)=>void };
   /** Tolerate latency proportional to the rate we are actually achieving; a
    * flat 150 ms fired constantly once `interval` reached 100 ms. */
   private staleLimit(): number { return Math.max(300,this.interval*3); }
@@ -88,11 +90,15 @@ export class HandTracker {
       if(!this.paused) this.options.frame({mode:"idle",progress:0,points:[],started:false,dx:0,dy:0,ratio:1});
     }
     if(this.ready && this.busy && now-this.lastSent>5000) { this.fail("Hand inference timed out");return; }
-    if(!this.ready || this.paused || document.hidden || this.busy || video.readyState<2 || video.currentTime===this.lastVideo || now-this.lastSent<this.interval) return;
-    this.busy=true; this.lastVideo=video.currentTime; this.lastSent=now;
+    if(!this.ready || this.paused || document.hidden || this.busy || now-this.lastSent<this.interval) return;
+    const sample=this.options.sample?.();
+    if(this.options.sample ? !sample : video.readyState<2) return;
+    const id=sample?.id??video.currentTime; if(id===this.lastVideo) return;
+    this.busy=true; this.lastVideo=id; this.lastSent=now;
     const epoch=this.epoch;
-    const width=Math.min(video.videoWidth,INFERENCE_WIDTH),height=Math.max(1,Math.round(video.videoHeight*width/video.videoWidth));
-    void createImageBitmap(video,{resizeWidth:width,resizeHeight:height}).then(bitmap=>{
+    const sw=sample?.width??video.videoWidth,sh=sample?.height??video.videoHeight;
+    const width=Math.min(sw,INFERENCE_WIDTH),height=Math.max(1,Math.round(sh*width/sw));
+    void createImageBitmap(sample?.image??video,{resizeWidth:width,resizeHeight:height}).then(bitmap=>{
       if(this.stopped || epoch!==this.epoch) { bitmap.close(); this.busy=false; return; }
       this.worker.postMessage({type:"frame",bitmap,time:now,epoch},[bitmap]);
     }).catch(error=>this.fail(String(error)));

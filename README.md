@@ -1,14 +1,14 @@
 # Interactive AR Brain Tumour Visualisation and Educational Simulation
 
 Academic demonstrator: MRI-derived tumour anatomy in an interactive 3D
-viewer and image-tracked AR, with clearly labelled educational growth and
+viewer and browser markerless AR, with clearly labelled educational growth and
 treatment scenarios. Full spec: [`docs/PLAN.md`](docs/PLAN.md). Progress
 checklist: [`docs/SCHEDULE.md`](docs/SCHEDULE.md).
 
 **Status: local 3D case package and educational scenarios implemented.**
 The ordinary viewer loads the MRI-derived demonstration contour, measured
 volumes, corrected-proportion MRI overlays and mask-derived scenario states.
-Tumour AR integration and target-device acceptance remain incomplete.
+Zappar world-tracking AR is integrated; real-device stability and performance acceptance remain pending.
 Redistribution permission has not been established; do not publicly host the
 case assets yet. See `data-processing/README.md` for reproduction.
 
@@ -43,7 +43,9 @@ npm run dev
 
 Generate the case package with the processing commands below before starting
 the frontend. Overview, Explore and Scenarios then work locally. The AR
-button explicitly reports pending integration.
+button opens markerless world tracking. Scan the room, choose **Place brain ahead**,
+and use **Unlock model** before enabling hand manipulation. See
+[`docs/evaluation/markerless-ar.md`](docs/evaluation/markerless-ar.md) for device setup and limitations.
 
 `mind-ar` and `three` are pinned to exact versions in `frontend/package.json`
 (**1.2.5 / 0.151.3** — not 0.186.0: mind-ar's prebuilt bundle imports three's
@@ -164,8 +166,9 @@ interaction, **Reset position** restores the model, and **Disable hand controls*
 stops the viewer camera. Mouse, touch and buttons remain available.
 
 In AR, enable hand controls after entering the camera view. MediaPipe reuses
-MindAR's rear-camera video; keep the printed marker visible. Marker loss freezes
-manipulation until reacquisition and a new gesture. The viewer uses a mirrored
+Zappar's rear-camera frames. No printed marker is needed. The model starts locked;
+unlock it for hand manipulation. Tracking loss hides the model and pauses
+manipulation until the anchor recovers and a new gesture starts. The viewer uses a mirrored
 front-camera preview; AR uses the rear-camera crop without mirroring.
 
 Inference runs locally in a worker with the pinned MediaPipe 0.10.35 module WASM
@@ -173,3 +176,26 @@ and model. Initial rate is 20 Hz, reduced to 10 Hz on slow inference or low fram
 rate. The full-resolution brain remains the default. No camera frames are stored
 or uploaded. See `docs/evaluation/hand-controls.md` for checks and remaining
 real-device acceptance work.
+
+## Voice commands
+
+Explore, Scenarios and initialized AR include **Enable voice controls**. The
+microphone remains off until pressed. English commands include “zoom in”,
+“rotate left”, “move up”, “reset position”, “opacity fifty percent”,
+“transparency 70 percent”, “cut sagittal/coronal/axial” and “cut off”. AR also
+supports “place brain”, “lock model” and “unlock model”. Pose changes require
+an unlocked, tracked AR model. Say **stop listening** or press **Stop listening**
+to disable the microphone. If the browser ends recognition, enable it again.
+
+Speech uses the browser's Web Speech API (including its prefixed variant).
+Availability depends on the browser and its speech service; API presence does
+not guarantee that recognition works. Unsupported/denied/error states leave
+buttons and hand controls usable. The browser may send audio to its speech
+service online; this app does not save audio or transcripts. Listening stops
+on navigation, AR entry/exit and page visibility changes.
+
+Validation: 35 frontend unit tests and production build passed. Browser tests
+simulate recognition events to check final-only execution, duplicate handling,
+settings synchronization, late-result rejection, navigation cleanup, microphone
+errors and AR lock enforcement. Real speech accuracy and simultaneous camera /
+microphone use in Safari and Brave remain device acceptance checks.

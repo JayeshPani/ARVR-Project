@@ -12,6 +12,7 @@ export class GesturePanel {
   private enabled=false;
   private paused=false;
   private available=true;
+  private unavailableMessage="Target lost—keep the marker visible";
   private pointers=new Set<number>();
   private wheelTimer=0;
   private host: HTMLElement;
@@ -24,8 +25,9 @@ export class GesturePanel {
   private external: boolean;
   private surface: HTMLElement;
   private controlSurface:HTMLElement|null=null;
-  constructor(host: HTMLElement,target: GestureTarget,surface: HTMLElement,video?: HTMLVideoElement) {
-    this.host=host; this.target=target; this.surface=surface; this.external=!!video;
+  private frameSource?: {sample:()=>{image:ImageBitmapSource;width:number;height:number;id:number}|null;mapping:()=>VideoMapping};
+  constructor(host: HTMLElement,target: GestureTarget,surface: HTMLElement,video?: HTMLVideoElement, frameSource?: {sample:()=>{image:ImageBitmapSource;width:number;height:number;id:number}|null;mapping:()=>VideoMapping}) {
+    this.frameSource=frameSource;this.host=host; this.target=target; this.surface=surface; this.external=!!video;
     host.innerHTML=`<h3>Hand controls</h3><div class="button-row"><button type="button" data-hand="enable">Enable hand controls</button><button type="button" data-hand="pause" disabled>Pause</button><button type="button" data-hand="reset">Reset position</button></div><p data-hand="status" role="status">Camera off</p><label><input type="checkbox" data-hand="preview" /> Show hand preview</label><div class="hand-preview" hidden></div><p class="control-note">Open palm: rotate / tilt · One pinch held briefly: move · Two pinches spread together/apart: zoom. Release to stop. Video is processed on this device.</p>`;
     this.status=host.querySelector('[data-hand="status"]')!;
     this.toggle=host.querySelector('[data-hand="enable"]')!;
@@ -37,7 +39,7 @@ export class GesturePanel {
     this.overlay=document.createElement("canvas"); this.overlay.className="hand-overlay";
     if(video) { surface.append(this.overlay); this.overlay.style.display="none"; } else this.preview.append(this.overlay);
     this.toggle.onclick=()=>{ if(this.enabled) this.disable(); else void this.enable(); };
-    this.pause.onclick=()=>{ this.paused=!this.paused; this.tracker?.setPaused(this.paused||!this.available||this.pointers.size>0); this.pause.textContent=this.paused?"Resume":"Pause"; this.status.textContent=this.paused?"Paused":"Ready — release hands before starting"; this.clear(); };
+    this.pause.onclick=()=>{ this.paused=!this.paused; this.tracker?.setPaused(this.paused||!this.available||this.pointers.size>0); this.pause.textContent=this.paused?"Resume":"Pause"; this.status.textContent=this.paused?"Paused":this.available?"Ready — release hands before starting":this.unavailableMessage; this.clear(); };
     host.querySelector<HTMLButtonElement>('[data-hand="reset"]')!.onclick=()=>{ this.tracker?.cancel(); target.resetManipulation(); };
     host.querySelector<HTMLInputElement>('[data-hand="preview"]')!.onchange=(event)=>{
       const visible=(event.target as HTMLInputElement).checked;
@@ -70,6 +72,7 @@ export class GesturePanel {
   private cachedMapping:VideoMapping|null=null;
   private context2d:CanvasRenderingContext2D|null=null;
   private mapping=():VideoMapping=>{
+    if(this.frameSource) return this.frameSource.mapping();
     if(!this.external) return {x:0,y:0,width:1,height:1,mirrored:true};
     // Two getBoundingClientRect calls per tracked frame forced a layout on the
     // critical path. The video's placement inside the surface only changes on
@@ -90,17 +93,18 @@ export class GesturePanel {
         this.ownedStream=stream;
       }
       if(this.disposed || generation!==this.generation) return;
-      this.tracker=new HandTracker({video:this.video,mapping:this.mapping,
+      this.tracker=new HandTracker({video:this.video,mapping:this.mapping,sample:this.frameSource?.sample,
         aspect:()=>this.external?this.surface.clientWidth/Math.max(1,this.surface.clientHeight):this.video.videoWidth/Math.max(1,this.video.videoHeight),
         frame:frame=>{ if(!this.enabled || this.paused || !this.available) return; this.target.applyGesture(frame); this.draw(frame); },
         status:status=>{ if(generation!==this.generation) return; if(status.startsWith("Hand controls unavailable")) { this.disable();this.status.textContent=status; }
-          else this.status.textContent=this.paused?"Paused":!this.available?"Target lost—keep the marker visible":status; }});
+          else this.status.textContent=this.paused?"Paused":!this.available?this.unavailableMessage:status; }});
       this.tracker.setPaused(!this.available); this.pause.disabled=false;
     } catch(error) { if(generation!==this.generation) return; this.disable(); this.status.textContent=`Hand controls unavailable: ${String(error)}. Use mouse, touch or buttons.`; }
   }
-  setAvailable(available:boolean):void {
+  setAvailable(available:boolean,message="Target lost—keep the marker visible"):void {
+    this.unavailableMessage=message;
     this.available=available; this.tracker?.setPaused(this.paused||!available); this.clear();
-    if(this.enabled) this.status.textContent=available?"Ready — release hands before starting":"Target lost—keep the marker visible";
+    if(this.enabled) this.status.textContent=available?"Ready — release hands before starting":this.unavailableMessage;
   }
   private draw(frame:GestureFrame):void {
     const labels={idle:"Ready — show one open palm or pinch",arming:`Hold to ${frame.action}… ${Math.round(frame.progress*10)*10}%`,rotate:"Rotating",move:"Moving",zoom:"Zooming"};
@@ -117,6 +121,7 @@ export class GesturePanel {
     }
   }
   private clear():void { (this.context2d??=this.overlay.getContext("2d"))?.clearRect(0,0,this.overlay.width,this.overlay.height); }
+  cancelActiveGesture():void { this.tracker?.cancel(); this.clear(); }
   disable():void {
     this.generation++; this.enabled=false; this.paused=false;
     this.cameraAbort?.abort(); this.cameraAbort=null;clearTimeout(this.wheelTimer);this.pointers.clear();
